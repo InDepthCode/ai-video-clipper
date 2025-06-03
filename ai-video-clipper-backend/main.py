@@ -1,3 +1,4 @@
+import json
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import modal
@@ -8,7 +9,9 @@ import os
 import uuid
 import pathlib
 import boto3
-
+import whisperx
+import time
+import subprocess
 
 class ProcessVideoRequest(BaseModel):
     s3_key: str
@@ -51,12 +54,44 @@ class AiVideoClipper:
     @modal.enter() # Now 'enter' is defined
     def load_model(self):
         print("Loading models")
+        self.whisperx_model = whisperx.load_model("large-v2", device="cuda", compute_type="float16")
+
+        self.alignment_model, self.metadata = whisperx.load_align_model(
+
+            language_code="en", 
+            device="cuda"
+        )
+
+
+        print("Transcription models loaded.... ")
         
-        pass
     
     def transcribe_video(self, base_dir:str, video_path:str) -> str:
-        pass
+        audio_path = base_dir / "audio.wav"
+        extract_cmd = f"ffmpeg -i {video_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 {audio_path}"
+        subprocess.run(extract_cmd, shell=True, check=True ,capture_output=True)
+        print("Starting transcription....")
+        start_time = time.time()
 
+        audio = whisperx.load_audio(str(audio_path))
+        result = self.whisperx_model.transcribe(audio, batch_size=16)
+
+        result = whisperx.align(
+        result["segments"], 
+        self.alignment_model, 
+        self.metadata, 
+        audio, 
+        device="cuda",
+        return_char_alignments=False
+        )
+
+        duration = time.time() - start_time
+        print("Transcription and alignment completed in {:.2f} seconds".format(duration))
+
+        print(json.dumps(result, indent=4))
+
+
+        
 
     @modal.fastapi_endpoint(method="POST")
     def process_video(self, request: ProcessVideoRequest, token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
@@ -75,10 +110,8 @@ class AiVideoClipper:
         video_path = base_dir / "input.mp4"
         s3_client = boto3.client("s3")
         s3_client.download_file("ai-video-clippers", s3_key, str(video_path))
-        print(os.listdir(base_dir))
-
         
-        return {"message": f"Video {request.s3_key} processed successfully!"}
+        self.transcribe_video(base_dir, video_path)
 
 
 @app.local_entrypoint()

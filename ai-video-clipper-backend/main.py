@@ -51,7 +51,12 @@ class AiVideoClipper:
     @modal.enter() # Now 'enter' is defined
     def load_model(self):
         print("Loading models")
+        
         pass
+    
+    def transcribe_video(self, base_dir:str, video_path:str) -> str:
+        pass
+
 
     @modal.fastapi_endpoint(method="POST")
     def process_video(self, request: ProcessVideoRequest, token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
